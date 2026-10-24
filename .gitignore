@@ -1,0 +1,4 @@
+.env
+.assistant-config.json
+node_modules/
+*.log
