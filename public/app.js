@@ -10,18 +10,26 @@ function render(){
  $('#send').disabled=busy;$('#input').disabled=busy;$('#new').disabled=busy;$('#messages').lastElementChild?.scrollIntoView({block:'nearest'});
 }
 async function api(url,data){const r=await fetch(url,{method:data?'POST':'GET',headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});const result=await r.json();if(!r.ok)throw Error(result.error||'Request failed');return result;}
-async function status(){try{const s=await api('/api/status');configured=s.configured;$('#model').value=s.model;$('#status').textContent=configured?'● Ready when you are':'○ Setup needed';}catch{$('#status').textContent='○ Server unavailable';}}
+let savedProvider='ollama',savedModel='llama3.2:3b';
+function providerFields(){const local=$('#provider').value==='ollama';$('#keyFields').hidden=local;$('#localHelp').hidden=!local;}
+async function status(){try{const s=await api('/api/status');configured=s.configured;savedProvider=s.provider;savedModel=s.model;$('#provider').value=s.provider;$('#model').value=s.model;providerFields();$('#status').textContent=configured?(s.provider==='ollama'?'● Local AI ready':'● OpenAI ready'):'○ Setup needed';return s;}catch{$('#status').textContent='○ Server unavailable';}}
+$('#provider').onchange=()=>{providerFields();$('#model').value=$('#provider').value===savedProvider?savedModel:$('#provider').value==='ollama'?'llama3.2:3b':'gpt-4.1-mini';};
 $('#new').onclick=()=>{active=null;$('#notice').textContent='';render();$('#input').focus();};
-$('#composer').onsubmit=async e=>{e.preventDefault();const content=$('#input').value.trim();if(!content||busy)return;if(!configured){openSettings();return;}let c=chats.find(c=>c.id===active);if(!c){c={id:crypto.randomUUID(),title:content.slice(0,42),messages:[]};chats.unshift(c);active=c.id;}c.messages.push({role:'user',content});$('#input').value='';busy=true;$('#notice').textContent=prefs.name+' is thinking…';save();render();
+$('#composer').onsubmit=async e=>{e.preventDefault();const content=$('#input').value.trim();if(!content||busy)return;if(!configured){await status();if(!configured){openSettings();return;}}let c=chats.find(c=>c.id===active);if(!c){c={id:crypto.randomUUID(),title:content.slice(0,42),messages:[]};chats.unshift(c);active=c.id;}c.messages.push({role:'user',content});$('#input').value='';busy=true;$('#notice').textContent=prefs.name+' is thinking…'+(savedProvider==='ollama'?' Local replies may take a few minutes.':'');save();render();
  try{const result=await api('/api/chat',{messages:c.messages.slice(-60),name:prefs.name});c.messages.push({role:'assistant',content:result.reply});$('#notice').textContent='';if(prefs.speak&&'speechSynthesis'in window){speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(result.reply));}}
  catch(err){c.messages.pop();$('#input').value=content;$('#notice').textContent=err.message;}
  finally{busy=false;save();render();$('#input').focus();}
 };
 $('#input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('#composer').requestSubmit();}};
 for(const b of document.querySelectorAll('[data-prompt]'))b.onclick=()=>{$('#input').value=b.dataset.prompt;$('#input').focus();};
-function openSettings(){$('#name').value=prefs.name;$('#speak').checked=prefs.speak;$('#setupError').textContent='';$('#dialog').showModal();}
+function openSettings(){$('#provider').value=savedProvider;$('#model').value=savedModel;providerFields();$('#name').value=prefs.name;$('#speak').checked=prefs.speak;$('#setupError').textContent='';$('#dialog').showModal();}
 $('#settings').onclick=openSettings;$('#close').onclick=()=>$('#dialog').close();
-$('#setup').onsubmit=async e=>{e.preventDefault();try{if($('#key').value.trim()||configured){await api('/api/setup',{key:$('#key').value.trim(),model:$('#model').value.trim()});$('#key').value='';}else if(!configured)throw Error('Add an API key to enable AI replies.');prefs={name:$('#name').value.trim()||'Maya',speak:$('#speak').checked};save();render();await status();$('#dialog').close();}catch(err){$('#setupError').textContent=err.message;}};
+$('#setup').onsubmit=async e=>{e.preventDefault();if(busy){$('#setupError').textContent='Wait for the current reply before changing settings.';return;}$('#saveSettings').disabled=true;try{
+ const result=await api('/api/setup',{provider:$('#provider').value,key:$('#key').value.trim(),model:$('#model').value.trim()});$('#key').value='';
+ prefs={name:$('#name').value.trim()||'Maya',speak:$('#speak').checked};save();render();await status();
+ if(!result.configured){$('#setupError').textContent=result.message||'Settings saved. Finish setup to start chatting.';return;}
+ $('#dialog').close();
+ }catch(err){$('#setupError').textContent=err.message;}finally{$('#saveSettings').disabled=false;}};
 $('#export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(chats,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='assistant-chats.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 $('#clear').onclick=()=>{if(busy){$('#setupError').textContent='Wait for the current reply before deleting chats.';return;}if(confirm('Delete all chats stored in this browser?')){chats=[];active=null;save();render();}};
 const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
